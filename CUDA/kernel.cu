@@ -32,6 +32,12 @@
 
 #include <tchar.h>
 ////////////////////////////////////////////////////////////////////////////////
+//共享内存的相关定义
+HANDLE hMapFile;
+LPCTSTR pBuf;
+#define BUF_SIZE 1024
+TCHAR szName[] = TEXT("Global\\MyFileMappingObject");    //指向同一块共享内存的名字
+float *GetSharedMemeryPtr;
 
 #define PI 3.1415926
 // constants
@@ -437,6 +443,10 @@ void launch_kernel(float4 *pos, int verticesNum)
 	// execute the kernel
 	//dim3 block(8, 8, 1);
 	//dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
+	for (int i = 0; i < 24; i++)
+	{
+		Handinf[i] = GetSharedMemeryPtr[i];
+	}
 	ComputeJointsRotationMatrix(JointsRotationMatrix, Handinf);
 	ComputeJointsGlobalMatrix(JointsGlobalMatrix, JointsRotationMatrix, JointsTransMatrix, JointsLocalMatrix_inverse);
 	ComputeFinalMatrix(JointsGlobalMatrix, Handmodel_weights, finalMatrix);
@@ -450,6 +460,40 @@ void launch_kernel(float4 *pos, int verticesNum)
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
+#pragma region SharedMemery
+	hMapFile = CreateFileMapping(
+		INVALID_HANDLE_VALUE,    // use paging file
+		NULL,                    // default security
+		PAGE_READWRITE,          // read/write access
+		0,                       // maximum object size (high-order DWORD)
+		BUF_SIZE,                // maximum object size (low-order DWORD)
+		szName);                 // name of mapping object
+
+	if (hMapFile == NULL)
+	{
+		_tprintf(TEXT("Could not create file mapping object (%d).\n"),
+			GetLastError());
+		return 1;
+	}
+	pBuf = (LPTSTR)MapViewOfFile(hMapFile,   // handle to map object
+		FILE_MAP_ALL_ACCESS, // read/write permission
+		0,
+		0,
+		BUF_SIZE);
+
+	if (pBuf == NULL)
+	{
+		_tprintf(TEXT("Could not map view of file (%d).\n"),
+			GetLastError());
+
+		CloseHandle(hMapFile);
+
+		return 1;
+	}
+
+	GetSharedMemeryPtr = (float*)pBuf;
+#pragma endregion SharedMemery
+
 
 	printf("%s starting...\n", sSDKsample);
 	loadvertic(".\\model\\handverts.txt");
