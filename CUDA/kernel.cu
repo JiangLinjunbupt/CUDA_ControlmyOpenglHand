@@ -108,7 +108,7 @@ struct Pose
 	Pose(float xx, float yy, float zz) :x(xx), y(yy), z(zz) {}
 	Pose() {}
 };
-const int NUMofJoints = 23;
+const int NUMofJoints = 22;
 //手模的世界坐标系下的关节点，通过原始的BVH文件计算得来。
 const float4 HandJointsInitGlobalPosition[NUMofJoints] = {
 	make_float4(0.0f,0.0f,0.0f,1), /*0----->wrist*/
@@ -133,7 +133,6 @@ const float4 HandJointsInitGlobalPosition[NUMofJoints] = {
 	make_float4(-59.707f,69.457f,5.811f,1),/* 19 ---->thumbmiddle*/
 	make_float4(-89.150f,96.657f,9.811f,1),/*20 ---->thumbtop*/
 	make_float4(-102.633f,114.594f,14.026f,1),/* 21 ----->thumbSite*/
-	make_float4(182.085f,-23.553f,82.556f,1)/* 22 ----->forearm*/
 };
 
 //固定的
@@ -252,11 +251,6 @@ float JointsLocalMatrix_inverse[16 * NUMofJoints] = {
 	-0.590548f , 0.785604f  , 0.184606f ,-153.226f,
 	0.799343f  , 0.600876f  , 0         , 13.1823f,
 	-0.110925f , 0.147563f  ,-0.982813f ,-14.5088f,
-	0          , 0          , 0         , 1,
-	/* 22 ----->forearm*/
-	-0.983774f , 0.0653119f ,-0.167104f , 194.464f,
-	0.0662433f , 0.997803f  , 0         , 11.4398f,
-	0.166737f  ,-0.0110695f ,-0.985939f , 50.7744f,
 	0          , 0          , 0         , 1
 
 };
@@ -372,18 +366,12 @@ float JointsTransMatrix[16 * NUMofJoints] = {
 	1           , 0          , 0         ,  22.8323f,
 	0           , 1          , 0         ,  0,
 	0           , 0          , 1         ,  0,
-	0           , 0          , 0         ,  1,
-	/* 22 ----->forearm*/
-	1           , 0          , 0         ,  -194.464f,
-	0           , 1          , 0         ,  -11.4398f,
-	0           , 0          , 1         ,  -50.7744f,
 	0           , 0          , 0         ,  1
-};
 
+};
 
 //根据输入手模参数计算得到
 float JointsRotationMatrix[16 * NUMofJoints] = {
-	1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,
 	1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,
 	1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,
 	1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,
@@ -424,7 +412,6 @@ __global__ void simple_vbo_kernel(float4 *pos, float4* vertices,int verticesNum,
 {
 	unsigned int index = blockIdx.x*blockDim.x + threadIdx.x;
 	if (index >= verticesNum) return;
-
 
 	float x = vertices[index].x;
 	float y = vertices[index].y;
@@ -496,8 +483,8 @@ int main(int argc, char **argv)
 
 
 	printf("%s starting...\n", sSDKsample);
-	loadvertic(".\\model\\handverts.txt");
-	loadweight(".\\model\\newWeight.txt");
+	loadvertic(".\\model\\newVertices.txt");
+	loadweight(".\\model\\newWeights.txt");
 	//cudaMalloc(&d_weight, sizeof(float)*Handmodel_vertices_num *23);
 	//cudaMalloc(&d_globalMatrix, sizeof(float) * 16 * 23);
 	cudaMalloc(&d_vertices, sizeof(float) * 4 * Handmodel_vertices_num);
@@ -785,11 +772,8 @@ void loadvertic(char*filename)
 	finalMatrix = new float[Handmodel_vertices_num * 16];
 	for (int i = 0; i < Handmodel_vertices_num; i++) {
 		f >> Handmodel_vertices[i].x >> Handmodel_vertices[i].y >> Handmodel_vertices[i].z;
-		Handmodel_vertices[i].x = Handmodel_vertices[i].x - 79.446518;      //这里加的是handbone相对于wrist的偏移，由于BVH文件最初是以Handbone为基准的，vertices也是以此为基准的，这里相当于对所有的点改变基准坐标
-		Handmodel_vertices[i].y = Handmodel_vertices[i].y + 5.274386;
-		Handmodel_vertices[i].z = Handmodel_vertices[i].z - 13.494767;
-		Handmodel_vertices[i].w = 1;          //w参数必须设置为1，不能不赋值，不然手模是不可见的（这里猜测w代表透明度吧）
-											  //cout<< vertices_(i,0)<<" " << vertices_(i,1)<<" "<<vertices_(i,2)<<endl;
+		Handmodel_vertices[i].w = 1;          //w参数必须设置为1，不能不赋值，不然手模是不可见的（这里猜测w代表透明度吧）,
+		                                      //但是在kernel中对于Opengl交互的点的w强行赋值为1，所以这里也没所谓了
 	}
 	f.close();
 	printf("Load vertices succeed!!!\n");
@@ -801,12 +785,12 @@ void loadweight(char*filename)
 	std::ifstream f;
 	f.open(filename, std::ios::in);
 	//int number;
-	Handmodel_weights = new float[Handmodel_vertices_num * 23];
+	Handmodel_weights = new float[Handmodel_vertices_num * NUMofJoints];
 
 	for (int i = 0; i < Handmodel_vertices_num; i++) {
-		for (int j = 0; j < 23; j++)
+		for (int j = 0; j < NUMofJoints; j++)
 		{
-			f >> Handmodel_weights[i * 23 + j];
+			f >> Handmodel_weights[i * NUMofJoints + j];
 		}
 	}
 	f.close();
@@ -1039,12 +1023,6 @@ void ComputeJointsGlobalMatrix(float *joints_global_matrix, float *joints_rotati
 	MatrixProduct(joints_global_matrix, 21, joints_global_matrix, 21, joints_rotation_matrix, 21);
 
 
-	//forarm
-	MatrixProduct(joints_global_matrix, 22, joints_global_matrix, 0, joints_trans_matrix, 22);
-	MatrixProduct(joints_global_matrix, 22, joints_global_matrix, 22, joints_rotation_matrix, 22);
-
-
-
 	for (int i = 0; i < NUMofJoints; i++)
 	{
 		MatrixProduct(joints_global_matrix, i, joints_rotation_matrix, 0, joints_global_matrix, i);
@@ -1062,20 +1040,20 @@ void ComputeFinalMatrix(float *joints_global_matrix, float *weight, float *final
 {
 	for (int i = 0; i < Handmodel_vertices_num; i++)
 	{
-		for (int k = 0; k < 23; k++)
+		for (int k = 0; k < NUMofJoints; k++)
 		{
 			if (k == 0)
 			{
 				for (int j = 0; j < 16; j++)
 				{
-					finalM[i * 16 + j] = weight[i * 23 + k] * joints_global_matrix[k * 16 + j];
+					finalM[i * 16 + j] = weight[i * NUMofJoints + k] * joints_global_matrix[k * 16 + j];
 				}
 			}
 			else
 			{
 				for (int j = 0; j < 16; j++)
 				{
-					finalM[i * 16 + j] += weight[i * 23 + k] * joints_global_matrix[k * 16 + j];
+					finalM[i * 16 + j] += weight[i * NUMofJoints + k] * joints_global_matrix[k * 16 + j];
 				}
 			}
 		}
