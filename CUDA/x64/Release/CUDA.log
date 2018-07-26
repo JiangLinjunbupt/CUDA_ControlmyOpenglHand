@@ -100,20 +100,20 @@ c:\program files\nvidia gpu computing toolkit\cuda\v8.0\include\math_functions.h
 c:\program files\nvidia gpu computing toolkit\cuda\v8.0\include\math_functions.h(7956): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
 CUDACOMPILE : nvcc warning : The 'compute_20', 'sm_20', and 'sm_21' architectures are deprecated, and may be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
   kernel.cu
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(144): warning C4838: 从“double”转换到“float”需要收缩转换
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(144): warning C4305: “初始化”: 从“double”到“float”截断
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(259): warning C4838: 从“double”转换到“float”需要收缩转换
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(259): warning C4305: “初始化”: 从“double”到“float”截断
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(808): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(809): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(810): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(814): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(815): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(816): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(845): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(846): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(847): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
-O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(849): warning C4305: “参数”: 从“double”到“float”截断
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(148): warning C4838: 从“double”转换到“float”需要收缩转换
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(148): warning C4305: “初始化”: 从“double”到“float”截断
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(263): warning C4838: 从“double”转换到“float”需要收缩转换
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(263): warning C4305: “初始化”: 从“double”到“float”截断
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(865): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(866): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(867): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(871): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(872): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(873): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(902): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(903): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(904): warning C4244: “参数”: 从“double”转换到“float”，可能丢失数据
+O:/vsstudioProjects/CUDAproject/CUDA/CUDA/kernel.cu(906): warning C4305: “参数”: 从“double”到“float”截断
   LINK : 已指定 /LTCG，但不需要生成代码；从链接命令行中移除 /LTCG 以提高链接器性能
   CUDA.vcxproj -> O:\vsstudioProjects\CUDAproject\CUDA\x64\Release\CUDA.exe
   CUDA.vcxproj -> O:\vsstudioProjects\CUDAproject\CUDA\x64\Release\CUDA.pdb (Full PDB)

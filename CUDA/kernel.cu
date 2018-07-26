@@ -55,6 +55,7 @@ float rotate_x = 0.0, rotate_y = 0.0;
 float translate_z = -50.0;
 
 cudaEvent_t start_time, stop_time;
+cudaEvent_t test_start_time, test_stop_time;
 
 // Auto-Verification Code
 int fpsCount = 0;        // FPS count for averaging
@@ -63,7 +64,6 @@ float avgFPS = 0.0f;
 unsigned int frameCount = 0;
 char fps[256];
 #define MAX(a,b) ((a > b) ? a : b)
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
@@ -91,9 +91,13 @@ const char *sSDKsample = "simpleGL (VBO)";
 /////////////////////////
 void loadvertic(char*filename);
 void loadweight(char*filename);
+void loadFaceIndex(char*filename);
 float *Handmodel_weights;
 float4 *Handmodel_vertices;
 int Handmodel_vertices_num;
+int Handmodel_faces_num;
+int *FaceIndex;
+
 
 float *d_weight;
 float4* d_vertices;
@@ -408,19 +412,57 @@ void MatrixProduct(float *out, int StartIndex_out, float *a, int StartIndex_a, f
 void ComputeJointsGlobalMatrix(float *joints_global_matrix, float *joints_rotation_matrix, float *joints_trans_matrix, float *joints_localmatrix_inv);
 void ComputeFinalMatrix(float *joints_global_matrix, float *weight,float *finalM);
 
-__global__ void simple_vbo_kernel(float4 *pos, float4* vertices,int verticesNum, float *finalM)
+__global__ void simple_vbo_kernel(float4 *pos, float4* vertices,int verticesNum, float *Global,float *weight)
 {
 	unsigned int index = blockIdx.x*blockDim.x + threadIdx.x;
 	if (index >= verticesNum) return;
 
+
+	float M00 = 0;
+	float M01 = 0;
+	float M02 = 0; 
+	float M03 = 0;
+	float M10 = 0;
+	float M11 = 0;
+	float M12 = 0;
+	float M13 = 0;
+	float M20 = 0;
+	float M21 = 0;
+	float M22 = 0;
+	float M23 = 0;
+
+	for (int joint_num = 0; joint_num < 22; joint_num++)
+	{
+		M00 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 0];
+		M01 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 1];
+		M02 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 2];
+		M03 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 3];
+
+		M10 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 4];
+		M11 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 5];
+		M12 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 6];
+		M13 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 7];
+
+		M20 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 8];
+		M21 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 9];
+		M22 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 10];
+		M23 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 11];
+	}
+	
 	float x = vertices[index].x;
 	float y = vertices[index].y;
 	float z = vertices[index].z;
 
+	float4 handbone = make_float4(-79.446f, 5.274f, -13.494f, 1);/* 1 ----> handbone*/
+
+	float handboneX = Global[1 * 16 + 0] * handbone.x + Global[1 * 16 + 1] * handbone.y + Global[1 * 16 + 2] * handbone.z + Global[1 * 16 + 3];
+	float handboneY = Global[1 * 16 + 4] * handbone.x + Global[1 * 16 + 5] * handbone.y + Global[1 * 16 + 6] * handbone.z + Global[1 * 16 + 7];
+	float handboneZ = Global[1 * 16 + 8] * handbone.x + Global[1 * 16 + 9] * handbone.y + Global[1 * 16 + 10] * handbone.z + Global[1 * 16 + 11];
+
 	// write output vertex
-	pos[index].x = finalM[index * 16 + 0] * x + finalM[index * 16 + 1] * y + finalM[index * 16 + 2] * z + finalM[index * 16 + 3];
-	pos[index].y = finalM[index * 16 + 4] * x + finalM[index * 16 + 5] * y + finalM[index * 16 + 6] * z + finalM[index * 16 + 7];
-	pos[index].z = finalM[index * 16 + 8] * x + finalM[index * 16 + 9] * y + finalM[index * 16 + 10] * z + finalM[index * 16 + 11];
+	pos[index].x = M00 * x + M01 * y + M02 * z + M03 - handboneX;
+	pos[index].y = M10 * x + M11 * y + M12 * z + M13 - handboneY;
+	pos[index].z = M20 * x + M21 * y + M22 * z + M23 - handboneZ;
 	pos[index].w = 1;
 
 }
@@ -436,10 +478,12 @@ void launch_kernel(float4 *pos, int verticesNum)
 	}
 	ComputeJointsRotationMatrix(JointsRotationMatrix, Handinf);
 	ComputeJointsGlobalMatrix(JointsGlobalMatrix, JointsRotationMatrix, JointsTransMatrix, JointsLocalMatrix_inverse);
-	ComputeFinalMatrix(JointsGlobalMatrix, Handmodel_weights, finalMatrix);
-	//cudaMemcpy(d_globalMatrix, JointsGlobalMatrix, sizeof(float) * 16 * 23, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_finalMatrix, finalMatrix, sizeof(float) * 16 * verticesNum, cudaMemcpyHostToDevice);
-	simple_vbo_kernel << < (verticesNum+512-1)/512, 512 >> >(pos, d_vertices, verticesNum,d_finalMatrix);
+
+	cudaMemcpy(d_globalMatrix, JointsGlobalMatrix, sizeof(float) * 16 * NUMofJoints, cudaMemcpyHostToDevice);
+	//ComputeFinalMatrix(JointsGlobalMatrix, Handmodel_weights, finalMatrix);
+	//cudaMemcpy(d_finalMatrix, finalMatrix, sizeof(float) * 16 * verticesNum, cudaMemcpyHostToDevice);
+	simple_vbo_kernel << < (verticesNum+512-1)/512, 512 >> >(pos, d_vertices, verticesNum, d_globalMatrix,d_weight);
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -485,21 +529,20 @@ int main(int argc, char **argv)
 	printf("%s starting...\n", sSDKsample);
 	loadvertic(".\\model\\newVertices.txt");
 	loadweight(".\\model\\newWeights.txt");
-	//cudaMalloc(&d_weight, sizeof(float)*Handmodel_vertices_num *23);
-	//cudaMalloc(&d_globalMatrix, sizeof(float) * 16 * 23);
+	loadFaceIndex(".\\model\\newFaces.txt");
+	cudaMalloc(&d_weight, sizeof(float)*Handmodel_vertices_num *NUMofJoints);
+	cudaMalloc(&d_globalMatrix, sizeof(float) * 16 * NUMofJoints);
 	cudaMalloc(&d_vertices, sizeof(float) * 4 * Handmodel_vertices_num);
-	cudaMalloc(&d_finalMatrix, sizeof(float)*Handmodel_vertices_num * 16);
-	//cudaMemcpy(d_weight, Handmodel_weights, sizeof(float)*23* Handmodel_vertices_num, cudaMemcpyHostToDevice);
+	//cudaMalloc(&d_finalMatrix, sizeof(float)*Handmodel_vertices_num * 16);
+	cudaMemcpy(d_weight, Handmodel_weights, sizeof(float)*NUMofJoints* Handmodel_vertices_num, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_vertices, Handmodel_vertices, sizeof(float)*4* Handmodel_vertices_num, cudaMemcpyHostToDevice);
-
+ 
 	runTest(argc, argv);
 
-
-
-	//cudaFree(d_weight);
-	//cudaFree(d_globalMatrix);
+	cudaFree(d_weight);
+	cudaFree(d_globalMatrix);
 	cudaFree(d_vertices);
-	cudaFree(d_finalMatrix);
+	//cudaFree(d_finalMatrix);
 	return 0;
 }
 
@@ -510,6 +553,7 @@ void computeFPS()
 	fpsCount++;
 	float time = 0;
 	cudaEventElapsedTime(&time, start_time, stop_time);
+	//std::cout << "1 Ö¡µÄÊ±¼ä£º" << time << std::endl;
 	//printf("time is : %f\n", time);
 	if (fpsCount == fpsLimit)
 	{
@@ -557,6 +601,9 @@ bool runTest(int argc, char **argv)
 	// Create the CUTIL timer
 	cudaEventCreate(&start_time);
 	cudaEventCreate(&stop_time);
+
+	cudaEventCreate(&test_start_time);
+	cudaEventCreate(&test_stop_time);
 
 	// First initialize OpenGL context, so we can properly set the GL for CUDA.
 	// This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
@@ -663,14 +710,13 @@ void display()
 
 	// render from the vbo
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glVertexPointer(4, GL_FLOAT, 0, 0);
-
 	glEnableClientState(GL_VERTEX_ARRAY);
-	glColor3f(1.0, 0.0, 0.0);
-	glPointSize(5);
-	//glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
-	glDrawArrays(GL_POINTS, 0, Handmodel_vertices_num);
+	glVertexPointer(4, GL_FLOAT, 0, 0);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glDrawElements(GL_TRIANGLES, 3 * Handmodel_faces_num, GL_UNSIGNED_INT, FaceIndex);
+	glDisableClientState(GL_COLOR_ARRAY);
 	glDisableClientState(GL_VERTEX_ARRAY);
+
 
 	glutSwapBuffers();
 
@@ -797,6 +843,18 @@ void loadweight(char*filename)
 	printf("Load weight succeed!!!\n");
 }
 
+void loadFaceIndex(char*filename)
+{
+	std::ifstream f;
+	f.open(filename, std::ios::in);
+	f >> Handmodel_faces_num;
+	FaceIndex = new int[Handmodel_faces_num * 3];
+	for (int i = 0; i < Handmodel_faces_num; i++)
+	{
+		f >> FaceIndex[i * 3] >> FaceIndex[i * 3 + 1] >> FaceIndex[i * 3 + 2];
+	}
+	f.close();
+}
 void ComputeRotation(float *joints_rotation_matrix, Pose p, int index)
 {
 	float cx, sx;
