@@ -14,7 +14,7 @@
 // OpenGL Graphics includes
 #include <helper_gl.h>
 #include <GL/freeglut.h>
-
+#include<helper_math.h>
 // includes, cuda
 #include <cuda_runtime.h>
 #include<device_launch_parameters.h>
@@ -31,6 +31,11 @@
 #include <vector_types.h>
 
 #include <tchar.h>
+
+#include<opencv2\opencv.hpp>
+#include<opencv2\core\core.hpp>
+#include<opencv2\highgui\highgui.hpp>
+#include<opencv2\imgproc\imgproc.hpp>
 ////////////////////////////////////////////////////////////////////////////////
 //共享内存的相关定义
 HANDLE hMapFile;
@@ -98,11 +103,14 @@ int Handmodel_vertices_num;
 int Handmodel_faces_num;
 int *FaceIndex;
 
-
+cv::Mat hand = cv::Mat::zeros(150, 150, CV_8UC1);
 float *d_weight;
 float4* d_vertices;
 float *d_globalMatrix;
 float *d_finalMatrix;
+int *d_Pixel;
+int Pixel[150*150];
+
 float Handinf[27] = { 0 };
 struct Pose
 {
@@ -412,26 +420,46 @@ void MatrixProduct(float *out, int StartIndex_out, float *a, int StartIndex_a, f
 void ComputeJointsGlobalMatrix(float *joints_global_matrix, float *joints_rotation_matrix, float *joints_trans_matrix, float *joints_localmatrix_inv);
 void ComputeFinalMatrix(float *joints_global_matrix, float *weight,float *finalM);
 
-__global__ void simple_vbo_kernel(float4 *pos, float4* vertices,int verticesNum, float *Global,float *weight)
+__global__ void LBS_kernel(float4 *pos, float4* vertices,int verticesNum, float *Global,float *weight,int *pixel)
 {
 	unsigned int index = blockIdx.x*blockDim.x + threadIdx.x;
 	if (index >= verticesNum) return;
 
+	__shared__ float share[512 * 22 + 22 * 12];
 
-	float M00 = 0;
-	float M01 = 0;
-	float M02 = 0; 
-	float M03 = 0;
-	float M10 = 0;
-	float M11 = 0;
-	float M12 = 0;
-	float M13 = 0;
-	float M20 = 0;
-	float M21 = 0;
-	float M22 = 0;
-	float M23 = 0;
+	if (threadIdx.x == 0)
+	{
+		for (int joint_num = 0; joint_num < 22; joint_num++)
+		{
+			share[512 * 22 + joint_num * 12 + 0] = Global[joint_num * 16 + 0];
+			share[512 * 22 + joint_num * 12 + 1] = Global[joint_num * 16 + 1];
+			share[512 * 22 + joint_num * 12 + 2] = Global[joint_num * 16 + 2];
+			share[512 * 22 + joint_num * 12 + 3] = Global[joint_num * 16 + 3];
 
+			share[512 * 22 + joint_num * 12 + 4] = Global[joint_num * 16 + 4];
+			share[512 * 22 + joint_num * 12 + 5] = Global[joint_num * 16 + 5];
+			share[512 * 22 + joint_num * 12 + 6] = Global[joint_num * 16 + 6];
+			share[512 * 22 + joint_num * 12 + 7] = Global[joint_num * 16 + 7];
+
+			share[512 * 22 + joint_num * 12 + 8] = Global[joint_num * 16 + 8];
+			share[512 * 22 + joint_num * 12 + 9] = Global[joint_num * 16 + 9];
+			share[512 * 22 + joint_num * 12 + 10] = Global[joint_num * 16 + 10];
+			share[512 * 22 + joint_num * 12 + 11] = Global[joint_num * 16 + 11];
+		}
+	}
 	for (int joint_num = 0; joint_num < 22; joint_num++)
+	{
+		share[threadIdx.x * 22 + joint_num] = weight[index * 22 + joint_num];
+	}
+
+	__syncthreads();
+
+
+	float M00 = 0; float M01 = 0; float M02 = 0; float M03 = 0;
+	float M10 = 0; float M11 = 0; float M12 = 0; float M13 = 0;
+	float M20 = 0; float M21 = 0; float M22 = 0; float M23 = 0;
+
+	/*for (int joint_num = 0; joint_num < 22; joint_num++)
 	{
 		M00 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 0];
 		M01 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 1];
@@ -447,8 +475,26 @@ __global__ void simple_vbo_kernel(float4 *pos, float4* vertices,int verticesNum,
 		M21 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 9];
 		M22 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 10];
 		M23 += weight[index * 22 + joint_num] * Global[joint_num * 16 + 11];
-	}
+	}*/
 	
+	for (int joint_num = 0; joint_num < 22; joint_num++)
+	{
+		M00 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 0];
+		M01 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 1];
+		M02 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 2];
+		M03 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 3];
+
+		M10 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 4];
+		M11 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 5];
+		M12 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 6];
+		M13 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 7];
+
+		M20 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 8];
+		M21 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 9];
+		M22 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 10];
+		M23 += share[threadIdx.x * 22 + joint_num] * share[512 * 22 + joint_num * 12 + 11];
+	}
+
 	float x = vertices[index].x;
 	float y = vertices[index].y;
 	float z = vertices[index].z;
@@ -459,13 +505,123 @@ __global__ void simple_vbo_kernel(float4 *pos, float4* vertices,int verticesNum,
 	float handboneY = Global[1 * 16 + 4] * handbone.x + Global[1 * 16 + 5] * handbone.y + Global[1 * 16 + 6] * handbone.z + Global[1 * 16 + 7];
 	float handboneZ = Global[1 * 16 + 8] * handbone.x + Global[1 * 16 + 9] * handbone.y + Global[1 * 16 + 10] * handbone.z + Global[1 * 16 + 11];
 
+	float updata_x = M00 * x + M01 * y + M02 * z + M03 - handboneX;
+	float updata_y = M10 * x + M11 * y + M12 * z + M13 - handboneY;
+	float updata_z = M20 * x + M21 * y + M22 * z + M23 - handboneZ - 1000;
 	// write output vertex
-	pos[index].x = M00 * x + M01 * y + M02 * z + M03 - handboneX;
-	pos[index].y = M10 * x + M11 * y + M12 * z + M13 - handboneY;
-	pos[index].z = M20 * x + M21 * y + M22 * z + M23 - handboneZ;
+	pos[index].x = updata_x;
+	pos[index].y = updata_y;
+	pos[index].z = updata_z;
 	pos[index].w = 1;
 
+	int pixel_x = updata_x*381.8452f / updata_z + 264.0945f - 181;
+	int pixel_y = updata_y*382.1713f / updata_z + 217.1487f - 137;
+
+
+	if (pixel_x > 0 && pixel_x < 150 && pixel_y>0 && pixel_y < 150)
+	{
+		//atomicAdd(&pixel[pixel_y * 150 + pixel_x], 1);
+		pixel[pixel_y * 150 + pixel_x] += 1;
+	}
+
 }
+
+
+__device__ int getmin(float p1, float p2, float p3)
+{
+	float p = p1;
+	if (p > p2)  p = p2;
+	if (p > p3)  p = p3;
+
+	return (int)p;
+}
+__device__ int getmax(float p1, float p2, float p3)
+{
+	float p = p1;
+	if (p < p2) p = p2;
+	if (p < p3) p = p3;
+
+	return (int)p;
+}
+
+__global__ void Projection_kernel(float4 *updata_vertices, int *k, int *faceindex, int face_num) {
+	unsigned int index = blockIdx.x*blockDim.x + threadIdx.x;
+	if (index >= face_num) return;
+
+	int p1 = faceindex[index * 3 + 0];
+	int p2 = faceindex[index * 3 + 1];
+	int p3 = faceindex[index * 3 + 2];
+
+
+	float p1_2d_depth = -updata_vertices[p1].z;  float p1_2d_x = updata_vertices[p1].x*381.8452f / updata_vertices[p1].z + 264.0945f;   float p1_2d_y = updata_vertices[p1].y*382.1713f / updata_vertices[p1].z + 217.1487f;
+
+	float p2_2d_depth = -updata_vertices[p2].z;  float p2_2d_x = updata_vertices[p2].x*381.8452f / updata_vertices[p2].z + 264.0945f;   float p2_2d_y = updata_vertices[p2].y*382.1713f / updata_vertices[p2].z + 217.1487f;
+
+	float p3_2d_depth = -updata_vertices[p3].z;  float p3_2d_x = updata_vertices[p3].x*381.8452f / updata_vertices[p3].z + 264.0945f;   float p3_2d_y = updata_vertices[p3].y*382.1713f / updata_vertices[p3].z + 217.1487f;
+
+	float x0 = p2_2d_x - p1_2d_x;
+	float y0 = p2_2d_y - p1_2d_y;
+	float x1 = p3_2d_x - p1_2d_x;
+	float y1 = p3_2d_y - p1_2d_y;
+
+	float alpha0 = 0;
+	float alpha1 = 0;
+
+	int xmin = getmin(p1_2d_x, p2_2d_x, p3_2d_x);    int xmax = getmax(p1_2d_x, p2_2d_x, p3_2d_x);
+	int ymin = getmin(p1_2d_y, p2_2d_y, p3_2d_y);    int ymax = getmax(p1_2d_y, p2_2d_y, p3_2d_y);
+
+	for (int i = ymin; i <= ymax; i++) {
+		for (int j = xmin; j <= xmax; j++) {
+
+			if (j >= 0 && j < 512
+				&& i >= 0 && i < 424)
+			{
+				int a = (p2_2d_x - p1_2d_x)*(i - p1_2d_y) - (p2_2d_y - p1_2d_y)*(j - p1_2d_x);      //用叉乘计算面积，从而判断该点是否在三角形内部
+				int b = (p3_2d_x - p2_2d_x)*(i - p2_2d_y) - (p3_2d_y - p3_2d_x)*(j - p2_2d_x);
+				int c = (p1_2d_x - p3_2d_x)*(i - p3_2d_y) - (p1_2d_y - p3_2d_y)*(j - p3_2d_x);
+
+				if ((a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0))
+				{
+
+					float x2 = j - p1_2d_x;
+					float y2 = i - p1_2d_y;
+
+
+					if (x1*y0 - x0*y1 != 0) {
+						alpha1 = (x2*y0 - y2*x0) / (x1*y0 - x0*y1);
+						alpha0 = (x2*y1 - x1*y2) / (x0*y1 - x1*y0);
+					}
+					else {
+						alpha1 = 0;
+						if (y0 != 0) {
+							alpha0 = (y2) / (y0);
+						}
+						else { alpha0 = (x2) / (x0); }
+					}
+
+					float depth = p1_2d_depth + alpha0*(p2_2d_depth - p1_2d_depth) + alpha1*(p3_2d_depth - p1_2d_depth);
+
+					int outputY = i;
+					int outputX = j;
+
+					if (k[outputY*512 + outputX] != 0)
+					{
+						atomicMin(&k[outputY*512 + outputX], (int)depth);
+					}
+					else
+					{
+						atomicAdd(&k[outputY*512 + outputX], (int)depth);
+					}
+
+				}
+			}
+		}
+	}
+
+
+}
+
+
 
 void launch_kernel(float4 *pos, int verticesNum)
 {
@@ -479,11 +635,30 @@ void launch_kernel(float4 *pos, int verticesNum)
 	ComputeJointsRotationMatrix(JointsRotationMatrix, Handinf);
 	ComputeJointsGlobalMatrix(JointsGlobalMatrix, JointsRotationMatrix, JointsTransMatrix, JointsLocalMatrix_inverse);
 
+	cudaMemset(d_Pixel, 0, sizeof(int) * 150 * 150);
 	cudaMemcpy(d_globalMatrix, JointsGlobalMatrix, sizeof(float) * 16 * NUMofJoints, cudaMemcpyHostToDevice);
 	//ComputeFinalMatrix(JointsGlobalMatrix, Handmodel_weights, finalMatrix);
 	//cudaMemcpy(d_finalMatrix, finalMatrix, sizeof(float) * 16 * verticesNum, cudaMemcpyHostToDevice);
-	simple_vbo_kernel << < (verticesNum+512-1)/512, 512 >> >(pos, d_vertices, verticesNum, d_globalMatrix,d_weight);
+	LBS_kernel << < (verticesNum+512-1)/512, 512 >> >(pos, d_vertices, verticesNum, d_globalMatrix,d_weight, d_Pixel);
+	cudaMemcpy(Pixel, d_Pixel, sizeof(int) * 150 * 150, cudaMemcpyDeviceToHost);
 
+
+	for (int i = 0; i < 150; i++)
+	{
+		for (int j = 0; j < 150; j++)
+		{
+			if (Pixel[i * 150 + j] > 0)
+			{
+				hand.at<uchar>(i, j) = 255;
+			}
+			else
+			{
+				hand.at<uchar>(i, j) = 0;
+			}
+		}
+	}
+
+	cv::imshow("hand", hand);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -533,6 +708,7 @@ int main(int argc, char **argv)
 	cudaMalloc(&d_weight, sizeof(float)*Handmodel_vertices_num *NUMofJoints);
 	cudaMalloc(&d_globalMatrix, sizeof(float) * 16 * NUMofJoints);
 	cudaMalloc(&d_vertices, sizeof(float) * 4 * Handmodel_vertices_num);
+	cudaMalloc(&d_Pixel, sizeof(int) * 150 * 150);
 	//cudaMalloc(&d_finalMatrix, sizeof(float)*Handmodel_vertices_num * 16);
 	cudaMemcpy(d_weight, Handmodel_weights, sizeof(float)*NUMofJoints* Handmodel_vertices_num, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_vertices, Handmodel_vertices, sizeof(float)*4* Handmodel_vertices_num, cudaMemcpyHostToDevice);
@@ -553,7 +729,7 @@ void computeFPS()
 	fpsCount++;
 	float time = 0;
 	cudaEventElapsedTime(&time, start_time, stop_time);
-	//std::cout << "1 帧的时间：" << time << std::endl;
+	std::cout << "1 帧的时间：" << time << std::endl;
 	//printf("time is : %f\n", time);
 	if (fpsCount == fpsLimit)
 	{
@@ -707,16 +883,38 @@ void display()
 	glTranslatef(0.0, 0.0, translate_z);
 	glRotatef(rotate_x, 1.0, 0.0, 0.0);
 	glRotatef(rotate_y, 0.0, 1.0, 0.0);
-
 	// render from the vbo
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
 	glEnableClientState(GL_VERTEX_ARRAY);
+	glLineWidth(1);
+	glColor3f(1.0, 1.0,1.0);
 	glVertexPointer(4, GL_FLOAT, 0, 0);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	glDrawElements(GL_TRIANGLES, 3 * Handmodel_faces_num, GL_UNSIGNED_INT, FaceIndex);
-	glDisableClientState(GL_COLOR_ARRAY);
 	glDisableClientState(GL_VERTEX_ARRAY);
 
+
+	//画世界坐标系中的xyz三个轴
+	glLineWidth(5);
+	glColor3f(1.0, 0.0, 0);
+	glBegin(GL_LINES);
+	glVertex3f(0, 0, 0);
+	glVertex3f(10, 0, 0);
+	glEnd();
+
+	glLineWidth(5);
+	glColor3f(0.0, 1.0, 0);
+	glBegin(GL_LINES);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 10, 0);
+	glEnd();
+
+	glLineWidth(5);
+	glColor3f(0.0, 0.0, 1.0);
+	glBegin(GL_LINES);
+	glVertex3f(0, 0, -10);
+	glVertex3f(0, 0, 0);
+	glEnd();
 
 	glutSwapBuffers();
 
@@ -860,18 +1058,18 @@ void ComputeRotation(float *joints_rotation_matrix, Pose p, int index)
 	float cx, sx;
 	float cy, sy;
 	float cz, sz;
-	if (index == 18)
-	{
-		cx = cosf(-p.y / 180.0f*PI);  sx = sinf(-p.y / 180.0f*PI);
-		cy = cosf(p.x / 180.0f*PI);   sy = sinf(p.x / 180.0f*PI);
-		cz = cosf(p.z / 180.0f*PI);   sz = sinf(p.z / 180.0f*PI);
-	}
-	else
-	{
+	//if (index == 18)
+	//{
+	//	cx = cosf(-p.y / 180.0f*PI);  sx = sinf(-p.y / 180.0f*PI);
+	//	cy = cosf(p.x / 180.0f*PI);   sy = sinf(p.x / 180.0f*PI);
+	//	cz = cosf(p.z / 180.0f*PI);   sz = sinf(p.z / 180.0f*PI);
+	//}
+	//else
+	//{
 		cx = cosf(p.x / 180.0f*PI);   sx = sinf(p.x / 180.0f*PI);
 		cy = cosf(p.y / 180.0f*PI);   sy = sinf(p.y / 180.0f*PI);
 		cz = cosf(p.z / 180.0f*PI);   sz = sinf(p.z / 180.0f*PI);
-	}
+	//}
 	int StatPose = index * 16;
 	joints_rotation_matrix[StatPose] = cy*cz;
 	joints_rotation_matrix[StatPose + 1] = -cy*sz;
@@ -904,7 +1102,7 @@ void ComputeHandRotation(float *joints_rotation_matrix, Pose p)
 	cz = cosf(-p.z / 180.0f*PI);   sz = sinf(-p.z / 180.0f*PI);
 
 	cz0 = cosf(-90.0f / 180.0f*PI); sz0 = sinf(-90.0f / 180.0f*PI);
-
+	
 	int StatPose = 0 * 16;
 	joints_rotation_matrix[StatPose] = cy*cz*cz0 - cy*sz*sz0;
 	joints_rotation_matrix[StatPose + 1] = -cy*cz*sz0 - cy*sz*cz0;
@@ -930,7 +1128,7 @@ void ComputeJointsRotationMatrix(float *joints_rotation_matrix, float *handinf)
 	ComputeHandRotation(joints_rotation_matrix, p_hand);
 
 	//thumb
-	Pose p_thumb_lower(handinf[12], handinf[18], handinf[13]);
+	Pose p_thumb_lower(-handinf[18], handinf[12], handinf[13]);
 	Pose p_thumb_middle(0, handinf[19], 0);
 	Pose p_thumb_top(0, handinf[14], 0);
 	ComputeRotation(joints_rotation_matrix, p_thumb_lower, 18);
@@ -1004,7 +1202,7 @@ void MatrixProduct(float *out, int StartIndex_out, float *a, int StartIndex_a, f
 	out[StartIndex_out * 16 + 15] = a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
 }
 
-void ComputeJointsGlobalMatrix(float *joints_global_matrix, float *joints_rotation_matrix, float *joints_trans_matrix, float *joints_localmatrix_inv)
+void ComputeJointsGlobalMatrix(float *joints_global_matrix, float *joints_rotation_matrix, float *joints_trans_matrix, float *joints_localmatrix_inv) 
 {
 	for (int i = 0; i < 16; i++)
 	{
